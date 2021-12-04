@@ -58,6 +58,6 @@ This query generates an error. The reason that this isn’t allowed is that all 
 The sixth phase is applicable if the query has an ORDER BY clause. This phase is responsible for returning the result in a specific presentation order according to the expressions that appear in the ORDER BY list. The query indicates that the result rows should be ordered first by country (in ascending order by default), and then by yearhired, descending, yielding the following output:
 
 country yearhired numemployees
---------------- ----------- ------------
+|-|-|-|
 UK 2015 2
 UK 2014 2
