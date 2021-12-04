@@ -61,3 +61,61 @@ The sixth phase is applicable if the query has an ORDER BY clause. This phase is
 |-|-|-|
 | UK | 2015 | 2 |
 | UK | 2014 | 2 |
+
+### The FROM clause
+
+If you aliased the Employees table as E, the reference Employees.empid is invalid; you have to use E.empid, as the following example demonstrates:
+```
+SELECT E.empid, firstname, lastname, country
+FROM HR.Employees AS E;
+```
+
+*`!!!`* If you try running this code by using the full table name as the column prefix, the code 
+will fail.
+
+Renaming the aliases:
+```
+SELECT empid AS employeeid, firstname + N' ' + lastname AS fullname
+FROM HR.Employees;
+```
+
+If duplicates are possible in the result, and you want to eliminate them in order to return a relational result, you can do so by adding a DISTINCT clause
+```
+SELECT DISTINCT country, region, city
+FROM HR.Employees;
+```
+
+According to standard SQL, a SELECT query must have at minimum FROM and SELECT clauses. Conversely, T-SQL supports a SELECT query with only a SELECT 
+clause and without a FROM clause. Such a query is as if issued against an imaginary table that has only one row. For example, the following query is invalid according to standard SQL, but is valid according to T-SQL:
+```
+SELECT 10 AS col1, 'ABC' AS col2;
+```
+
+The output of this query is a single row with attributes resulting from the expressions with names assigned using the aliases:
+
+| col1 | col2 |
+|-|-|
+| 10 | ABC |
+
+### Predicates and three-valued-logic
+
+Consider the following query, which filters only employees from the US:
+```
+SELECT empid, firstname, lastname, country, region, city
+FROM HR.Employees
+WHERE country = N'USA';
+```
+
+In case you’re wondering why the literal ‘USA’ is preceded with the letter N as a prefix, that’s to denote a Unicode character string literal, because the country column is of the data type NVARCHAR. Had the country column been of a regular character string data type, such as VARCHAR, the literal should have been just ‘USA’.
+
+### Check NULL
+
+T-SQL supports the IS NULL and IS NOT NULL operators to check if a NULL is or isn’t present, respectively. Here’s the solution query that correctly handles NULLs:
+```
+SELECT empid, firstname, lastname, country, region, city
+FROM HR.Employees
+WHERE region <> N'WA'
+ OR region IS NULL;
+```
+This query generates an output of rows having NULLs.
+
