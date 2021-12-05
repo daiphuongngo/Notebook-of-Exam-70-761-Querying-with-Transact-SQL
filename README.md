@@ -1,6 +1,6 @@
 # Notebook-of-Exam-70-761-Querying-with-Transact-SQL
 
-This Repository contains my notes of highlights from the book: Exam 70-761 Querying with Transact SQL (T-SQL)
+This Repository contains my notes of highlights (not all content) from the book: Exam 70-761 Querying with Transact SQL (T-SQL)
 
 ### Keyed-in order:
 
@@ -229,5 +229,220 @@ out how to sort the orders by shipped date ascending, but have NULLs sort last. 
 ### Filtering data with TOP and OFF-FETCH
 
 #### Filtering data with TOP
+
+```
+SELECT TOP (3) orderid, orderdate, custid, empid
+FROM Sales.Orders
+ORDER BY orderdate DESC;
+```
+
+Specify the number of rows you want to filter:
+```
+orderid orderdate custid empid
+----------- ---------- ----------- -----------
+11077 2016-05-06 65 1
+11076 2016-05-06 9 4
+11075 2016-05-06 68 8
+```
+*`EXAM TIP`*
+
+T-SQL supports specifying the number of rows to filter using the TOP option in SELECT  queries without parentheses, but that’s only for backward-compatibility reasons. The correct syntax is with parentheses.
+
+Specify a percent of rows to filter instead of a number:
+
+```
+SELECT TOP (1) PERCENT orderid, orderdate, custid, empid
+FROM Sales.Orders
+ORDER BY orderdate DESC;
+```
+
+```
+orderid orderdate custid empid
+----------- ---------- ----------- -----------
+11074 2016-05-06 73 7
+11075 2016-05-06 68 8
+11076 2016-05-06 9 4
+11077 2016-05-06 65 1
+11070 2016-05-05 44 2
+11071 2016-05-05 46 1
+11072 2016-05-05 20 4
+11073 2016-05-05 58 2
+11067 2016-05-04 17 1
+```
+
+Specifiy a self-contained expression:
+```
+SELECT TOP (1) PERCENT orderid, orderdate, custid, empid
+FROM Sales.Orders
+ORDER BY orderdate DESC;
+```
+
+```
+orderid orderdate custid empid
+----------- ---------- ----------- -----------
+11074 2016-05-06 73 7
+11075 2016-05-06 68 8
+11076 2016-05-06 9 4
+11077 2016-05-06 65 1
+11070 2016-05-05 44 2
+```
+
+But there’s no guarantee that the same rows will be returned if you run the query again. If you are really after three arbitrary rows, it might be a good idea to add an ORDER BY clause with the expression (SELECT NULL) to let people know that your choice is intentional and not 
+an oversight. Here’s how your query would look:
+```
+SELECT TOP (3) orderid, orderdate, custid, empid
+FROM Sales.Orders
+ORDER BY (SELECT NULL);
+```
+
+Note that even when you do have an ORDER BY clause, in order for the query to be completely deterministic, the ordering must be unique. For example, consider again the first 
+query from this section:
+```
+SELECT TOP (3) orderid, orderdate, custid, empid
+FROM Sales.Orders
+ORDER BY orderdate DESC;
+```
+```
+orderid orderdate custid empid
+----------- ---------- ----------- -----------
+11077 2016-05-06 65 1
+11076 2016-05-06 9 4
+11075 2016-05-06 68 8
+```
+
+But what if there are other rows in the result without TOP that have the same order date as in the last row here? You don’t always care about guaranteeing deterministic or repeatable results; but if you do, two options are available to you. One option is to ask to include all ties with the last row by adding the WITH TIES option, as follows:
+```
+SELECT TOP (3) WITH TIES orderid, orderdate, custid, empid
+FROM Sales.Orders
+ORDER BY orderdate DESC;
+```
+
+Of course, this could result in returning more rows than you asked for, as the output of this query shows:
+```
+orderid orderdate custid empid
+----------- ---------- ----------- -----------
+11074 2016-05-06 73 7
+11075 2016-05-06 68 8
+11076 2016-05-06 9 4
+11077 2016-05-06 65 1
+```
+
+Now the selection of rows is deterministic, but still the presentation order between rows with the same order date isn’t. The other option to guarantee determinism is to break the ties by adding a tiebreaker that makes the ordering unique. For example, in case of ties in the order date, suppose you wanted to use the order ID, descending, as the tiebreaker. To do so, add orderid DESC to your ORDER BY clause, as follows:
+```
+SELECT TOP (3) orderid, orderdate, custid, empid
+FROM Sales.Orders
+ORDER BY orderdate DESC, orderid DESC;
+```
+Now both the selection of rows and presentation order are deterministic. This query generates the following output:
+```
+orderid orderdate custid empid
+----------- ---------- ----------- -----------
+11077 2016-05-06 65 1
+11076 2016-05-06 9 4
+11075 2016-05-06 68 8
+```
+
+### Filtering data with OFFSET-FETCH
+
+Unlike TOP, it is standard, and also has a skipping capability, making it useful for ad-hoc paging purposes.
+
+- Right after the ORDER BY clause (require ORDER BY)
+- OFFSET: indicating how many rows you want to skip (0 if you don’t want to skip any); 
+- FETHC: then optionally indicating how many rows you want to filter.
+
+Define ordering based on order date descending, followed by order ID descending; it then skips the first 50 rows and fetches the next 25 rows:
+```
+SELECT orderid, orderdate, custid, empid
+FROM Sales.Orders
+ORDER BY orderdate DESC, orderid DESC
+OFFSET 50 ROWS FETCH NEXT 25 ROWS ONLY;
+```
+Here’s an abbreviated form of the output:
+```
+orderid orderdate custid empid
+----------- ---------- ----------- -----------
+11027 2016-04-16 10 1
+11026 2016-04-15 27 4
+...
+11004 2016-04-07 50 3
+11003 2016-04-06 78 3
+```
+
+In T-SQL, the OFFSET-FETCH option requires an ORDER BY clause to be present. Also, in T-SQL—contrary to standard SQL—a FETCH clause requires an OFFSET clause to be present. So if you do want to filter some rows but skip none, you still need to specify the OFFSET clause with 0 ROWS.
+
+In order to make the syntax intuitive, you can use the keywords NEXT or FIRST interchangeably. When skipping some rows, it might be more intuitive to you to use the keywords 
+FETCH NEXT to indicate how many rows to filter; but when not skipping any rows, it might be more intuitive to you to use the keywords FETCH FIRST, as follows:
+```
+SELECT orderid, orderdate, custid, empid
+FROM Sales.Orders
+ORDER BY orderdate DESC, orderid DESC
+OFFSET 0 ROWS FETCH FIRST 25 ROWS ONLY
+```
+
+In T-SQL, a FETCH clause requires an OFFSET clause, but the OFFSET clause doesn’t require 
+a FETCH clause.  
+
+Skip 50 rows, returning all the rest
+```
+SELECT orderid, orderdate, custid, empid
+FROM Sales.Orders
+ORDER BY orderdate DESC, orderid DESC
+OFFSET 50 ROWS;
+```
+This query generates the following output, shown here in abbreviated form:
+```
+orderid orderdate custid empid
+----------- ---------- ----------- -----------
+11027 2016-04-16 10 1
+11026 2016-04-15 27 4
+...
+10249 2014-07-05 79 6
+10248 2014-07-04 85 5
+(780 row(s) affected)
+```
+
+But what if you need to filter a certain number of rows based on arbitrary order? To do so, you can specify the expression (SELECT NULL) in the ORDER BY clause, as follows:
+```
+SELECT orderid, orderdate, custid, empid
+FROM Sales.Orders
+ORDER BY (SELECT NULL)
+OFFSET 0 ROWS FETCH FIRST 3 ROWS ONLY;
+```
+
+This code simply filters three arbitrary rows. Here’s the output that I got when running this query on our system:
+```
+orderid orderdate custid empid
+----------- ---------- ----------- -----------
+10248 2014-07-04 85 5
+10249 2014-07-05 79 6
+10250 2014-07-08 34 4
+```
+
+With both the OFFSET and the FETCH clauses, you can use expressions as inputs. This is very handy when you need to compute the input values dynamically. For example, suppose 
+that you’re implementing a paging solution where you return to the user one page of rows at a time. The user passes as input parameters to your procedure or function the page number they are after (@pagenum parameter) and page size (@pagesize parameter). This means that you need to skip as many rows as @pagenum minus one times @pagesize, and fetch the next @pagesize rows. This can be implemented using the following code (using local variables for simplicity):
+```
+DECLARE @pagesize AS BIGINT = 25, @pagenum AS BIGINT = 3;
+SELECT orderid, orderdate, custid, empid
+FROM Sales.Orders
+ORDER BY orderdate DESC, orderid DESC
+OFFSET (@pagenum - 1) * @pagesize ROWS FETCH NEXT @pagesize ROWS ONLY;
+```
+With these inputs, the code returns the following output
+```
+orderid orderdate custid empid
+----------- ---------- ----------- -----------
+11027 2016-04-16 10 1
+11026 2016-04-15 27 4
+...
+11004 2016-04-07 50 3
+11003 2016-04-06 78 3
+```
+
+*`EXAM TIP`*
+In terms of logical query processing, the TOP and OFFSET-FETCH filters are processed after the FROM, WHERE, GROUP, HAVING and SELECT phases. You can consider these filters as being an extension to the ORDER BY clause. So, for example, if the query is a grouped query, and also involves a TOP or OFFSET-FETCH filter, the filter is applied after grouping. The same applies if the query has a DISTINCT clause and/or ROW_NUMBER calculation as part of the SELECT clause, as well as a TOP or OFFSET-FETCH filter. The filter is applied after the DISTINCT clause and/or ROW_NUMBER calculation.
+
+ON TOP AND OFFSET-FETCH
+For more information on the TOP and OFFSET-FETCH filters, see the free sample chapter of the book, “T-SQL Querying: Chapter 5 - TOP and OFFSET-FETCH.” This book is more advanced, and includes detailed coverage of optimization aspects. 
+
 
 
