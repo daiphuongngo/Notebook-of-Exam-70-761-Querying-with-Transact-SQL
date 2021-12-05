@@ -203,3 +203,31 @@ WHERE orderdate >= '20160401' AND orderdate < '20160501';
 
 *This time the output contains only the orders placed in April 2016.*
 
+Another tricky aspect of ordering is treatment of NULLs. Recall that a NULL represents a missing value, so when comparing a NULL to anything, you get the logical result unknown. 
+That’s the case even when comparing two NULLs. So it’s not that trivial to ask how NULLs should behave in terms of sorting. Should they all sort together? If so, should they sort before or after non-NULL values? Standard SQL says that NULLs should sort together, but leaves it to the implementation to decide whether to sort them before or after non-NULL values. In SQL Server the decision was to sort them before non-NULLs (when using an ascending direction). As an example, the following query returns for each order the order ID and shipped date, 
+ordered by the latter:
+```
+SELECT orderid, shippeddate
+FROM Sales.Orders
+WHERE custid = 20
+ORDER BY shippeddate;
+```
+
+Remember that unshipped orders have a NULL in the shippeddate column; hence, they sort before shipped orders, as the query output shows:
+```
+orderid shippeddate
+----------- -----------
+11008 NULL
+11072 NULL
+10258 2014-07-23
+10263 2014-07-31
+```
+
+Standard SQL supports the options NULLS FIRST and NULLS LAST to control how NULLs sort, but T-SQL doesn’t support this option. As an interesting challenge, see if you can figure 
+out how to sort the orders by shipped date ascending, but have NULLs sort last. (Hint: You can specify expressions in the ORDER BY clause; think of how to use the CASE expression to achieve this task.)
+
+### Filtering data with TOP and OFF-FETCH
+
+#### Filtering data with TOP
+
+
