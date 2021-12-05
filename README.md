@@ -110,7 +110,7 @@ In case you’re wondering why the literal ‘USA’ is preceded with the letter
 
 ### Check NULL
 
-T-SQL supports the IS NULL and IS NOT NULL operators to check if a NULL is or isn’t present, respectively. Here’s the solution query that correctly handles NULLs:
+T-SQL supports the IS NULL and IS NOT NULL operators to check if a NULL is or isn’t present, respectively. Here’s the solution query that correctly handles NULLs:
 ```
 SELECT empid, firstname, lastname, country, region, city
 FROM HR.Employees
@@ -118,4 +118,11 @@ WHERE region <> N'WA'
  OR region IS NULL;
 ```
 This query generates an output of rows having NULLs.
+
+| empid | firstname | lastname | country | region | city |
+|-|-|-|-|-|-|
+| 5 | Sven | Mortensen | UK | NULL | London |
+| 6 | Paul| Suurs| UK | NULL | London |
+| 7 | Russell | King | UK | NULL | London |
+| 9 | Patricia | Doyle |UK | NULL | London |
 
