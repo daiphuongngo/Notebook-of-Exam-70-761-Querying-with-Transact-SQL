@@ -126,3 +126,80 @@ This query generates an output of rows having NULLs.
 | 7 | Russell | King | UK | NULL | London |
 | 9 | Patricia | Doyle |UK | NULL | London |
 
+### Combining predicates
+
+You can deal with this problem in a number of ways. A simple option is to use the *TRY_CAST* function instead of CAST. When the input expression isn’t convertible to the target 
+type, TRY_CAST returns a NULL instead of failing. And comparing a NULL to anything yields unknown. Eventually, you will get the correct result, without allowing the query to fail. So your WHERE clause should be revised as follows:
+```
+WHERE propertytype = 'INT' AND TRY_CAST(propertyval AS INT) > 10
+```
+
+### Filtering character data
+
+```
+<column> LIKE <pattern>
+```
+![TABLE 1-1 Wildcards used in LIKE patterns](https://user-images.githubusercontent.com/70437668/144731358-6cdadc15-2617-42fd-b39c-0e009987c571.jpg)
+
+```
+SELECT empid, firstname, lastname
+FROM HR.Employees
+WHERE lastname LIKE N'D%';
+```
+
+This query returns the following output:
+
+| empid | firstname | lastname |
+|-|-|-|
+| 1 | Sara | Davis |
+| 9 | Patricia | Doyle |
+
+If you want to look for a character that is considered a wildcard, you can indicate it after a character that you designate as an escape character by using the ESCAPE keyword. For example, the expression col1 ```LIKE ‘!_%’ ESCAPE ‘!’``` looks for strings that start with an underscore (_) by using an exclamation point (!) as the escape character. Alternatively, you can place the wildcard in square brackets, as in col1 ```LIKE ‘[_]%’```
+
+### Filtering date and time data
+
+There are two main approaches. One is to use a form that is considered language-neutral. For example, the form ‘20160212’ is always interpreted as *ymd*, regardless of your language. Note that the form ‘2016-02-12’ is considered language-neutral only for the data types DATE, DATETIME2, and DATETIMEOFFSET. Unfortunately, due to historic reasons, this form is considered language-dependent for the types DATETIME and SMALLDATETIME. The advantage of the form without the separators is that it is language-neutral for all date and time types. So the recommendation is to write the query as follows:
+```
+SELECT orderid, orderdate, empid, custid
+FROM Sales.Orders
+WHERE orderdate = '20160212';
+```
+Another approach is to explicitly convert the string to the target type using the CONVERT function, and indicating the style number that represents the style that you used. You can find the documentation of the CONVERT function with the different style numbers that it supports at https://msdn.microsoft.com/en-GB/library/ms187928.aspx. For instance, to use the U.S. style, specify style number 101, as ```CONVERT(DATE, ‘02/12/2016’, 101)```.
+
+When filtering data stored in a DATETIME data type, you need to be very careful with ranges. To demonstrate why, first run the following code to create a table called Sales.Orders2 and populate it with a copy of the data from Sales.Orders, using the DATETIME data type for the orderdate attribute:
+```
+DROP TABLE IF EXISTS Sales.Orders2;
+SELECT orderid, CAST(orderdate AS DATETIME) AS orderdate, empid, custid
+INTO Sales.Orders2 
+FROM Sales.Orders;
+```
+
+Suppose you need to filter only the orders that were placed in April 2016. You use the following query in attempt to achieve this, thinking that the DATETIME type supports a three digit precision as the fraction of the second:
+```
+SELECT orderid, orderdate, empid, custid
+FROM Sales.Orders2
+WHERE orderdate BETWEEN '20160401' AND '20160430 23:59:59.999';
+```
+
+In practice, though, the precision of DATETIME is three and a third milliseconds. Because 999 is not a multiplication of this precision, the value is rounded up to the next millisecond, which happens to be the midnight of the next day. To make matters worse, when people want to store only a date in a DATETIME type, they store the date with midnight in the time, so besides returning orders placed in April 2016, this query also returns all orders placed in May 1, 2016. Here’s the output of this query, shown here in abbreviated format:
+```
+orderid orderdate empid custid
+----------- ----------------------- ----------- -----------
+10990 2016-04-01 00:00:00.000 2 20
+...
+11063 2016-04-30 00:00:00.000 3 37
+11064 2016-05-01 00:00:00.000 1 71
+11065 2016-05-01 00:00:00.000 8 46
+11066 2016-05-01 00:00:00.000 7 89
+(77 row(s) affected)
+```
+The recommended way to express a date and time range is with a closed-open interval as 
+follows:
+```
+SELECT orderid, orderdate, empid, custid
+FROM Sales.Orders2
+WHERE orderdate >= '20160401' AND orderdate < '20160501';
+```
+
+*This time the output contains only the orders placed in April 2016.*
+
