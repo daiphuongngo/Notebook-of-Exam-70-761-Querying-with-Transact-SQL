@@ -158,7 +158,7 @@ If you want to look for a character that is considered a wildcard, you can indic
 
 ### Filtering date and time data
 
-There are two main approaches. One is to use a form that is considered language-neutral. For example, the form ‘20160212’ is always interpreted as *ymd*, regardless of your language. Note that the form ‘2016-02-12’ is considered language-neutral only for the data types DATE, DATETIME2, and DATETIMEOFFSET. Unfortunately, due to historic reasons, this form is considered language-dependent for the types DATETIME and SMALLDATETIME. The advantage of the form without the separators is that it is language-neutral for all date and time types. So the recommendation is to write the query as follows:
+There are two main approaches. One is to use a form that is considered language-neutral. For example, the form ‘20160212’ is always interpreted as *`ymd`*, regardless of your language. Note that the form ‘2016-02-12’ is considered language-neutral only for the data types DATE, DATETIME2, and DATETIMEOFFSET. Unfortunately, due to historic reasons, this form is considered language-dependent for the types DATETIME and SMALLDATETIME. The advantage of the form without the separators is that it is language-neutral for all date and time types. So the recommendation is to write the query as follows:
 ```
 SELECT orderid, orderdate, empid, custid
 FROM Sales.Orders
