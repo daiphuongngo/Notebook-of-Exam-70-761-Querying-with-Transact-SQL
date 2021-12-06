@@ -441,8 +441,104 @@ orderid orderdate custid empid
 *`EXAM TIP`*
 In terms of logical query processing, the TOP and OFFSET-FETCH filters are processed after the FROM, WHERE, GROUP, HAVING and SELECT phases. You can consider these filters as being an extension to the ORDER BY clause. So, for example, if the query is a grouped query, and also involves a TOP or OFFSET-FETCH filter, the filter is applied after grouping. The same applies if the query has a DISTINCT clause and/or ROW_NUMBER calculation as part of the SELECT clause, as well as a TOP or OFFSET-FETCH filter. The filter is applied after the DISTINCT clause and/or ROW_NUMBER calculation.
 
-ON TOP AND OFFSET-FETCH
+### ON TOP AND OFFSET-FETCH
+
 For more information on the TOP and OFFSET-FETCH filters, see the free sample chapter of the book, “T-SQL Querying: Chapter 5 - TOP and OFFSET-FETCH.” This book is more advanced, and includes detailed coverage of optimization aspects. 
 
+## Combining sets with set operators
 
+#### UNION and UNION ALL 
+
+The ```UNION``` operator unifies the results of the two input queries. As a set operator, UNION has an implied DISTINCT property, meaning that it does not return duplicate rows.
+
+The ```UNION ALL``` operator unifies the results of the two input queries, but doesn’t try to eliminate duplicates.
+
+The ```INTERSECT``` operator returns only distinct rows that are common to both sets. 
+
+The ```EXCEPT``` operator performs set difference. 
+
+With UNION and INTERSECT, the order of the input queries doesn’t matter. However, with EXCEPT, there’s different meaning to:
+```
+<query 1> EXCEPT <query 2>
+```
+Versus:
+```
+<query 2> EXCEPT <query 1
+```
+
+Set operators have precedence: INTERSECT precedes UNION and EXCEPT, and UNION and EXCEPT are evaluated from left to right based on their position in the expression. 
+
+Consider the following set operators:
+```
+<query 1> UNION <query 2> INTERSECT <query 3>;
+```
+
+First, the intersection between query 2 and query 3 takes place, and then a union between the result of the intersection and query 1. You can always force precedence by using parentheses. So, if you want the union to take place first, you use the following form:
+```
+(<query 1> UNION <query 2>) INTERSECT <query 3>;
+```
+
+When you’re done, run the following code for cleanup:
+```
+DROP TABLE IF EXISTS Sales.Orders2
+```
+
+### JOINS
+
+Add a row to the Suppliers table:
+```
+USE TSQLV4;
+INSERT INTO Production.Suppliers
+ (companyname, contactname, contacttitle, address, city, postalcode, country, phone)
+ VALUES(N'Supplier XYZ', N'Jiru', N'Head of Security', N'42 Sekimai Musashino-shi',
+ N'Tokyo', N'01759', N'Japan', N'(02) 4311-2609');
+```
+
+```CROSS JOIN ``` performs a multiplication between the tables, yielding a row for each combination of rows from both sides. If you have m rows in table T1 and n rows in table T2, the result of a cross join between T1 and T2 is a virtual table with m × n rows. Figure 1-6 provides an illustration of a cross join.
+
+Consider an example from the TSQLV4 sample database. This database contains a table called dbo. Nums that has a column called n with a sequence of integers from 1 and on. Your 
+task is to use the Nums table to generate a result with a row for each weekday (1 through 7) and shift number (1 through 3), assuming there are three shifts a day. The result can later be used as the basis for building information about activities in the different shifts in the different days. With seven days in the week, and three shifts every day, the result should have 21 rows.
+
+Here’s a query that achieves the task by performing a cross join between two instances of the Nums table—one representing the days (aliased as D), and the other representing the 
+shifts (aliased as S):
+```
+USE TSQLV4;
+SELECT D.n AS theday, S.n AS shiftno 
+FROM dbo.Nums AS D
+ CROSS JOIN dbo.Nums AS S
+WHERE D.n <= 7
+ AND S.N <= 3
+ORDER BY theday, shiftno;
+```
+
+Here’s the output of this query:
+```
+theday shiftno
+----------- -----------
+1 1
+1 2
+1 3
+2 1
+2 2
+2 3
+3 1
+3 2
+3 3
+4 1
+4 2
+4 3
+5 1
+5 2
+5 3
+6 1
+6 2
+6 3
+7 1
+7 2
+7 3
+```
+
+With an ```INNER JOIN``` you can match rows from two tables based on a predicate—usually one that compares a primary key value in one side to a foreign key value in another side. 
+
+*`NOTE`*  Because SQL Server doesn’t create such indexes automatically, it’s your responsibility to identify the cases where they can be useful and create them. So when working on index tuning, one interesting area to examine is foreign key columns, and evaluating the benefits of creating indexes on those.
 
