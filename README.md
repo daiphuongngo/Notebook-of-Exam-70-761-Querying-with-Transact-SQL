@@ -542,3 +542,84 @@ With an ```INNER JOIN``` you can match rows from two tables based on a predicate
 
 *`NOTE`*  Because SQL Server doesn’t create such indexes automatically, it’s your responsibility to identify the cases where they can be useful and create them. So when working on index tuning, one interesting area to examine is foreign key columns, and evaluating the benefits of creating indexes on those.
 
+In terms of logical query processing, the WHERE is evaluated right after the FROM, so conceptually it is equivalent to concatenating the predicates with an AND operator, forming a conjunction of predicates. SQL Server knows this, and therefore can internally rearrange the order in which it evaluates the predicates in practice, and it does so 
+based on cost estimates. For these reasons, if you wanted, you could rearrange the placement of the predicates from the previous query, *`specifying both ON and WHERE in the ON clause` (in OUTER JOIN, it is not like that)*, and still retain the original meaning, as follows:
+```
+SELECT
+ S.companyname AS supplier, S.country,
+ P.productid, P.productname, P.unitprice
+FROM Production.Suppliers AS S
+ INNER JOIN Production.Products AS P
+ ON S.supplierid = P.supplierid
+ AND S.country = N'Japan'
+```
+With ```OUTER JOIN```, you can request to preserve all rows from one or both sides of the join, never mind if there are matching rows in the other side based on the ON predicate.
+
+### LEFT JOIN
+
+Unlike in the inner join, the left row with the key A is returned even though it has no match in the right side. It’s returned with NULLs as placeholders in the right side.
+
+```
+SELECT
+ S.companyname AS supplier, S.country,
+ P.productid, P.productname, P.unitprice
+FROM Production.Suppliers AS S
+ LEFT OUTER JOIN Production.Products AS P
+ ON S.supplierid = P.supplierid
+WHERE S.country = N'Japan';
+```
+This query generates the following output:
+```
+supplier country productid productname unitprice
+--------------- -------- ----------- -------------- ----------
+Supplier QOVFD Japan 9 Product AOZBW 97.00
+Supplier QOVFD Japan 10 Product YHXGE 31.00
+Supplier QOVFD Japan 74 Product BKAZJ 10.00
+Supplier QWUSF Japan 13 Product POXFU 6.00
+Supplier QWUSF Japan 14 Product PWCJB 23.25
+Supplier QWUSF Japan 15 Product KSZOI 15.50
+Supplier XYZ Japan NULL NULL NULL
+```
+
+It is very important to understand that, with outer joins, the ON and WHERE clauses play very different roles, and therefore, they aren’t interchangeable. The WHERE clause still plays a simple filtering role—namely, it keeps true cases and discards false and unknown cases. In our query, the WHERE clause filters only suppliers from Japan, so suppliers that aren’t from Japan simply don’t show up in the output.
+
+However, the ON clause doesn’t play a simple filtering role; rather, it’s a more sophisticated matching role. In other words, a row in the preserved side will be returned whether the ON predicate finds a match for it or not. So the ON predicate only determines which rows from the nonpreserved side get matched to rows from the preserved side—not whether to return the rows from the preserved side. In our query, the ON clause matches rows from both sides by comparing their supplier ID values. Because it’s a matching predicate (as opposed to a filter), the join won’t discard suppliers; instead, it only determines which products get matched to each supplier. But even if a supplier has no matches based on the ON predicate, the supplier is still returned. In other words, ON is not final with respect to the preserved side of the join. WHERE is final. So when in doubt, whether to specify the predicate in the ON or WHERE clauses, ask yourself: *`Is the predicate used to filter or match? Is it supposed to be final or nonfinal?`*
+
+Compare the above and below queries:
+```
+SELECT
+ S.companyname AS supplier, S.country,
+ P.productid, P.productname, P.unitprice
+FROM Production.Suppliers AS S
+ LEFT OUTER JOIN Production.Products AS P
+ ON S.supplierid = P.supplierid
+ AND S.country = N'Japan';
+```
+
+Observe what’s different in the result (shown here in abbreviated form) and see if you can explain in your own words what the query returns now:
+```
+supplier country productid productname unitprice
+--------------- -------- ---------- -------------- ----------
+Supplier SWRXU UK NULL NULL NULL
+Supplier VHQZD USA NULL NULL NULL
+Supplier STUAZ USA NULL NULL NULL
+Supplier QOVFD Japan 9 Product AOZBW 97.00
+Supplier QOVFD Japan 10 Product YHXGE 31.00
+Supplier QOVFD Japan 74 Product BKAZJ 10.00
+Supplier EQPNC Spain NULL NULL NULL
+Supplier QWUSF Japan 13 Product POXFU 6.00
+Supplier QWUSF Japan 14 Product PWCJB 23.25
+Supplier QWUSF Japan 15 Product KSZOI 15.50
+...
+(34 row(s) affected)
+
+```
+Now that both predicates appear in the ON clause, both serve a matching purpose. What this means is that all suppliers are returned—even those that aren’t from Japan. But in order to match a product to a supplier, the supplier IDs in both sides need to match, and the supplier country needs to be Japan.
+
+A ```FULL OUTER JOIN``` returns the matched rows, which are normally returned from an inner join; plus rows from the left that don’t have matches in the right, with NULLs used as placeholders in the right side; plus rows from the right that don’t have matches in the left, with NULLs used as placeholders in the left side. It’s not common to need a full outer join because most relationships between tables allow only one of the sides to have rows that don’t have matches in the other, in which case, a one-sided outer join is needed.
+
+### Queries with composite JOINs and NULLs in JOIN columns
+
+Some joins can be a bit tricky to handle, for instance when the join columns can have NULLs, or when you have multiple join columns—what’s known as a composite join. 
+
+
