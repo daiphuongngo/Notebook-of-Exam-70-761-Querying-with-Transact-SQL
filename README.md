@@ -622,4 +622,293 @@ A ```FULL OUTER JOIN``` returns the matched rows, which are normally returned fr
 
 Some joins can be a bit tricky to handle, for instance when the join columns can have NULLs, or when you have multiple join columns—what’s known as a composite join. 
 
+When you need to join tables that are related based on multiple columns, the join is called a composite join and the ON clause typically consists of a conjunction of predicates (predicates separated by AND operators) that match the corresponding columns from the two sides. Sometimes you need more complex predicates, especially when NULLs are involved. I’ll demonstrate this by using a pair of tables. One table is called EmpLocations and it holds employee locations and the number of employees in each location. Another table is called CustLocations and it holds customer locations and the number of customers in each location. 
+
+Run the following code to create these tables and populate them with sample data:
+
+```
+DROP TABLE IF EXISTS dbo.EmpLocations;
+SELECT country, region, city, COUNT(*) AS numemps
+INTO dbo.EmpLocations
+FROM HR.Employees
+GROUP BY country, region, city;
+ALTER TABLE dbo.EmpLocations ADD CONSTRAINT UNQ_EmpLocations
+ UNIQUE CLUSTERED(country, region, city);
+ 
+DROP TABLE IF EXISTS dbo.CustLocations;
+SELECT country, region, city, COUNT(*) AS numcusts
+INTO dbo.CustLocations
+FROM Sales.Customers
+GROUP BY country, region, city;
+ALTER TABLE dbo.CustLocations ADD CONSTRAINT UNQ_CustLocations
+ UNIQUE CLUSTERED(country, region, city);
+```
+
+There’s a key defined in both tables on the location attributes: country, region, and city. Instead of using a primary key constraint I used a unique constraint to enforce the key because the region attribute allows NULLs, and between the two types of constraints, only the latter allows NULLs. I also specified the CLUSTERED keyword in the unique constraint definitions to have SQL Server create a clustered index type to enforce the constraint’s uniqueness property. This index will be beneficial in supporting joins between the tables based on the location attributes as well filters based on those attributes.
+
+```
+SELECT country, region, city, numemps
+FROM dbo.EmpLocations;
+```
+```
+country region city numemps
+--------------- --------------- --------------- -----------
+UK NULL London 4
+USA WA Kirkland 1
+USA WA Redmond 1
+USA WA Seattle 2
+USA WA Tacoma 1
+```
+```
+SELECT country, region, city, numcusts
+FROM dbo.CustLocations;
+```
+```
+country region city numcusts
+--------------- --------------- --------------- -----------
+Argentina NULL Buenos Aires 3
+Austria NULL Graz 1
+Austria NULL Salzburg 1
+Belgium NULL Bruxelles 1
+Belgium NULL Charleroi 1
+Brazil RJ Rio de Janeiro 3
+Brazil SP Campinas 1
+Brazil SP Resende 1
+Brazil SP Sao Paulo 4
+Canada BC Tsawassen 1
+...
+(69 row(s) affected)
+```
+
+Join the two tables returning only matched locations, with both the employee and customer counts returned along with the location attributes. Your first attempt might be to write a composite join with an ON clause that has a conjunction of simple equality predicates as follows:
+```
+SELECT EL.country, EL.region, EL.city, EL.numemps, CL.numcusts
+FROM dbo.EmpLocations AS EL
+ INNER JOIN dbo.CustLocations AS CL
+ ON EL.country = CL.country
+ AND EL.region = CL.region
+ AND EL.city = CL.city;
+```
+```
+country region city numemps numcusts
+--------------- --------------- --------------- ----------- -----------
+USA WA Kirkland 1 1
+USA WA Seattle 2 1
+```
+
+The problem is that the region column supports NULLs representing cases where the region is irrelevant (missing but inapplicable) and when you compare NULLs with an equalitybased predicate the result is the logical value unknown, in which case the row is discarded. For instance, the location UK, NULL, London appears in both tables, and therefore you expect to see it in the result of the join, but you don’t. A common way for people to resolve this problem is to use the ISNULL or COALESCE functions to substitute a NULL in both sides with a value that can’t normally appear in the data, and this way when both sides are NULL you get a true back from the comparison. Here’s an example for implementing this solution using the ISNULL function:
+```
+SELECT EL.country, EL.region, EL.city, EL.numemps, CL.numcusts
+FROM dbo.EmpLocations AS EL
+ INNER JOIN dbo.CustLocations AS CL
+ ON EL.country = CL.country
+ AND ISNULL(EL.region, N'<N/A>') = ISNULL(CL.region, N'<N/A>')
+ AND EL.city = CL.city;
+```
+```
+country region city numemps numcusts
+--------------- --------------- --------------- ----------- -----------
+UK NULL London 4 6
+USA WA Kirkland 1 1
+USA WA Seattle 2 1
+```
+
+You can handle NULLs in a manner that gives you the desired logical meaning and that at the same time is considered order preserving by the optimizer using the predicate: (EL.region = CL.region OR (EL.region IS NULL AND CL.region IS NULL)). Here’s the complete solution 
+query: (p. 62)
+```
+SELECT EL.country, EL.region, EL.city, EL.numemps, CL.numcusts
+FROM dbo.EmpLocations AS EL
+ INNER JOIN dbo.CustLocations AS CL
+ ON EL.country = CL.country
+ AND (EL.region = CL.region OR (EL.region IS NULL AND CL.region IS NULL))
+ AND EL.city = CL.city;
+```
+
+The optimizer can rely on index order when using the merge join algorithm. To demonstrate this, again, force this algorithm by adding the MERGE join hint as follows: (p. 63)
+```
+SELECT EL.country, EL.region, EL.city, EL.numemps, CL.numcusts
+FROM dbo.EmpLocations AS EL
+ INNER MERGE JOIN dbo.CustLocations AS CL
+ ON EL.country = CL.country
+ AND (EL.region = CL.region OR (EL.region IS NULL AND CL.region IS NULL))
+ AND EL.city = CL.city;
+```
+
+Recall that when set operators combine query results they compare corresponding attributes using distinctness and not equality, producing true when comparing two NULLs. However, one drawback that set operators have is that they compare complete rows. Unlike joins, which allow comparing a subset of the attributes and return additional ones in the result, set operators must compare all attributes from the two input queries. But in T-SQL, you can combine joins and set operators to benefit from the advantages of both tools. Namely, rely on the distinctness-based comparison of set operators and the ability of joins to return additional attributes beyond what you compare. In our querying task, the solution looks like this:
+```
+SELECT EL.country, EL.region, EL.city, EL.numemps, CL.numcusts
+FROM dbo.EmpLocations AS EL
+ INNER JOIN dbo.CustLocations AS CL
+ ON EXISTS (SELECT EL.country, EL.region, EL.city
+ INTERSECT 
+ SELECT CL.country, CL.region, CL.city);
+```
+
+For each row that is evaluated by the join, the set operator performs an intersection of the employee location attributes and customer location attributes using FROM-less SELECT 
+statements, each producing one row. If the locations intersect, the result is one row, in which case the EXISTS predicate returns true, and the evaluated row is considered a match. If the locations don’t intersect, the result is an empty set, in which case the EXISTS predicate returns false, and the evaluated row is not considered a match. Remarkably, Microsoft added logic to the optimizer to consider this form order-preserving. The plan for this query is the same as 
+the one shown earlier in Figure 1-13.Use the following code to force the merge algorithm in the query:
+```
+SELECT EL.country, EL.region, EL.city, EL.numemps, CL.numcusts
+FROM dbo.EmpLocations AS EL
+ INNER MERGE JOIN dbo.CustLocations AS CL
+ ON EXISTS (SELECT EL.country, EL.region, EL.city
+           INTERSECT 
+           SELECT CL.country, CL.region, CL.city);
+```
+
+Also here the ordering property of the data is preserved and you get the plan shown earlier in Figure 1-14, where the clustered indexes of both sides are scanned in order and there’s no need for explicit sorting prior to performing the merge join. When you’re done, run the following code for cleanup:
+```
+DROP TABLE IF EXISTS dbo.CustLocations;
+DROP TABLE IF EXISTS dbo.EmpLocations;
+```
+
+### Multi-join queries
+
+```
+SELECT
+ S.companyname AS supplier, S.country,
+ P.productid, P.productname, P.unitprice,
+ C.categoryname
+FROM Production.Suppliers AS S
+ LEFT OUTER JOIN Production.Products AS P
+ ON S.supplierid = P.supplierid
+ INNER JOIN Production.Categories AS C
+ ON C.categoryid = P.categoryid
+WHERE S.country = N'Japan';
+```
+
+```
+supplier country productid productname unitprice categoryname
+--------------- ------- ---------- -------------- ---------- -------------
+Supplier QOVFD Japan 9 Product AOZBW 97.00 Meat/Poultry
+Supplier QOVFD Japan 10 Product YHXGE 31.00 Seafood
+Supplier QWUSF Japan 13 Product POXFU 6.00 Seafood
+Supplier QWUSF Japan 14 Product PWCJB 23.25 Produce
+Supplier QWUSF Japan 15 Product KSZOI 15.50 Condiments
+Supplier QOVFD Japan 74 Product BKAZJ 10.00 Produce
+```
+
+Supplier XYZ from Japan was discarded. Can you explain why?
+Conceptually, the first join included outer rows (suppliers with no products) but produced NULLs as placeholders in the product attributes in those rows. Then the join to Production.Categories compared the NULLs in the categoryid column in the outer rows to categoryid values in Production.Categories, and discarded those rows. In short, the inner join that followed the outer join nullified the outer part of the join. In fact, if you look at the query plan for this query, you will find that the optimizer didn’t even bother to process the join between Production.Suppliers and Production.Products as an outer join. It detected the contradiction between the outer join and the subsequent inner join, and converted the first join to an inner join too.
+
+There are a number of ways to address this problem. One is to use a ```LEFT OUTER in both joins```, like so:
+```
+SELECT
+ S.companyname AS supplier, S.country,
+ P.productid, P.productname, P.unitprice,
+ C.categoryname
+FROM Production.Suppliers AS S
+ LEFT OUTER JOIN Production.Products AS P
+ ON S.supplierid = P.supplierid
+ LEFT OUTER JOIN Production.Categories AS C
+ ON C.categoryid = P.categoryid
+WHERE S.country = N'Japan';
+```
+Another option is to use an interesting capability in the language—separate some of the joins to their own independent logical phase. What you’re after is a left outer join between Production.Suppliers and the result of the inner join between Production.Products and Production.Categories. You can phrase your query exactly like this:
+```
+SELECT
+ S.companyname AS supplier, S.country,
+ P.productid, P.productname, P.unitprice,
+ C.categoryname
+FROM Production.Suppliers AS S
+ LEFT OUTER JOIN 
+ (Production.Products AS P
+ INNER JOIN Production.Categories AS C
+ ON C.categoryid = P.categoryid)
+ ON S.supplierid = P.supplierid
+WHERE S.country = N'Japan';
+```
+
+With both fixes, the query generates the correct result, including suppliers who currently don’t have related products:
+```
+supplier country productid productname unitprice categoryname
+--------------- -------- ---------- -------------- ---------- -------------
+Supplier QOVFD Japan 9 Product AOZBW 97.00 Meat/Poultry
+Supplier QOVFD Japan 10 Product YHXGE 31.00 Seafood
+Supplier QOVFD Japan 74 Product BKAZJ 10.00 Produce
+Supplier QWUSF Japan 13 Product POXFU 6.00 Seafood
+Supplier QWUSF Japan 14 Product PWCJB 23.25 Produce
+Supplier QWUSF Japan 15 Product KSZOI 15.50 Condiments
+Supplier XYZ Japan NULL NULL NULL NULL
+```
+
+Note that the important change that made the difference is the arrangement of the ON clauses with respect to the joined tables. The ON clause ordering is what defines the logical join ordering. Each ON clause must appear right below the two units that it joins. By specifying the ON clause that matches attributes from Production.Products and Production.Categories first, you set this inner join to be logically evaluated first. Then the second ON clause handles the left outer join by matching an attribute from Production.Suppliers with an attribute from the result of the inner join. Curiously, T-SQL doesn’t really require the parentheses that I added to the query; remove those and rerun the query, and you will see that it runs successfully. However, it’s recommended to use those for clarity.
+
+*`EXAM TIP`*
+
+Multi join queries that mix different join types are very common in practice and therefore there’s a high likelihood that questions about those will show up in the exam. Make sure that you understand the pitfalls in mixing join types, especially when an outer join is subsequently followed by an inner join, which discards the outer rows that were produced by the outer join. When you’re done, run the following code to delete the supplier row that you added at the beginning of this skill:
+
+```
+DELETE FROM Production.Suppliers WHERE supplierid > 29
+```
+
+## 1.3 Implement functions & aggregate data
+
+### Type conversion functions 
+
+The two fundamental functions that T-SQL supports for conversion purposes are CAST and CONVERT. 
+
+The CAST function’s syntax is ```CAST(source_expression AS target_type```. For example, ```CAST(‘100’ AS INT)``` converts the source character string constant to the target integer value 100. 
+
+The CONVERT function is handy when you need to specify a style for the conversion. Its syntax is ```CONVERT(target_type, source_expression [, style_number])```. You can find the supported style numbers and their meaning at https://msdn.microsoft.com/en-us/library/ms187928.aspx. For instance, when converting a character string to a date and time type or the other way around, you can specify the style number to avoid ambiguity in case the form you use is considered language dependent. As an example, the expression ```CONVERT(DATE, ‘01/02/2017’, 101)``` converts the input string to a date using the U.S. style, meaning January 2, 2017. The expression ```CONVERT(DATE, ‘01/02/2017’, 103)``` uses the British/French style, meaning February 1, 2017.
+
+The PARSE function is an alternative to CONVERT when you want to parse a character string input to a target type, but instead of using cryptic style numbers, it uses a more userfriendly .NET culture name. For instance, the expression PARSE(‘01/02/2017’ AS DATE USING ‘en-US’) uses the English US culture, parsing the input as a date meaning January 2, 2017. The expression PARSE(‘01/02/2017’ AS DATE USING ‘en-GB’) uses the English Great Britain culture, parsing the input as a date meaning February 1, 2017. Note though that this function is significantly slower than CONVERT, so I personally stay away from using it. One of the problems with CAST, CONVERT, and PARSE is that if the function fails to convert a value within a query, the whole query fails and stops processing. As an alternative to these functions, T-SQL supports the TRY_CAST, TRY_CONVERT, and TRY_PARSE functions, which behave the same as their counterparts when the conversion is valid, but return a NULL instead of failing when the conversion isn’t valid. As an example, run the following code to try and convert two strings to dates using the CONVERT function:
+```
+SELECT CONVERT(DATE, '14/02/2017', 101) AS col1, 
+ CONVERT(DATE, '02/14/2017', 101) AS col2;
+```
+The first value doesn’t convert successfully and therefore this code fails with the following error:
+```
+Msg 241, Level 16, State 1, Line 26
+```
+Conversion failed when converting date and/or time from character string. Use the TRY_CONVERT function instead of CONVERT, like so:
+```
+SELECT TRY_CONVERT(DATE, '14/02/2017', 101) AS col1, 
+ TRY_CONVERT(DATE, '02/14/2017', 101) AS col2
+```
+
+This time the code doesn’t fail, but the first expression returns a NULL, as the following output shows:
+```
+col1 col2
+---------- ----------
+NULL 2017-02-14
+```
+
+Lastly, the FORMAT function is an alternative to the CONVERT function when you want to format an input expression of some type as a character string, but instead of using cryptic style numbers, you specify a .NET format string and culture, if relevant. For instance, to format an input date and time value, such as now, as a character string using the form ‘yyyy-MM-dd’, use the expression: ```FORMAT(SYSDATETIME(), ‘yyyy-MM-dd’)```. You can use any format string supported by the .NET Framework. (For details, see the topics “FORMAT (Transact-SQL)” and “Formatting Types in the .NET Framework” at https://msdn.microsoft.com/en-us/library/hh213505.aspx and http://msdn.microsoft.com/en-us/library/26etazsy.aspx.). Note that like PARSE, the FORMAT function is also quite slow, so when you need to format a large number of values in a query, you typically get much better performance with alternative built-in functions.
+
+### Date and time functions
+
+T-SQL supports a number of date and time functions that allow you to manipulate your date and time data. This section covers some of the important functions supported by T-SQL and provides some examples. For the full list, as well as the technical details and syntax, see the T-SQL documentation for the topic at https://msdn.microsoft.com/en-us/library/ms186724.aspx. 
+
+#### Current date and time 
+
+One important category of functions is the category that returns the current date and time. The functions in this category are GETDATE, CURRENT_TIMESTAMP, GETUTCDATE, SYSDATETIME, SYSUTCDATETIME, and SYSDATETIMEOFFSET. 
+
+```GETDATE``` is T-SQL–specific, returning the current date and time in the SQL Server instance you’re connected to as a DATETIME data type. 
+
+```CURRENT_TIMESTAMP``` is the same, only it’s standard, and hence the recommended one to use. 
+
+```SYSDATETIME``` and ```SYSDATETIMEOFFSET``` are similar, only returning the values as the more precise ```DATETIME2``` and ```DATETIMEOFFSET``` types (including the time zone offset from UTC), respectively. 
+
+**Note that there are no built-in functions to return the current date and the current time. To get such information, simply cast the SYSDATETIME function to DATE or TIME, respectively.**For example, to get the current date, use C```AST(SYSDATETIME() AS DATE)```. The ```GETUTCDATE``` function returns the current date and time in UTC terms as a DATETIME type, and ```SYSUTCDATETIME``` does the same, only returning the result as the more precise DATETIME2 type.
+
+#### Date and time parts
+
+Using the DATEPART function, you can extract from an input date and time value a desired part, such as a year, minute, or nanosecond, and return the extracted part as an integer. For example, the expression DATEPART(month, ‘20170212’) returns 2. T-SQL provides the functions YEAR, MONTH, and DAY as abbreviations to DATEPART, not requiring you to specify the part. The DATENAME function is similar to DATEPART, only it returns the name of the part as a character string, as opposed to the integer value. Note that the function is language dependent. That is, if the effective language in your session is us_english, the expression DATENAME(month, ‘20170212’) returns ‘February’, but for Italian, it returns ‘febbraio.'
+
+T-SQL provides a set of functions that construct a desired date and time value from its numeric parts. You have such a function for each of the six available date and time types: DATEFROMPARTS, DATETIME2FROMPARTS, DATETIMEFROMPARTS, DATETIMEOFFSETFROMPARTS, SMALLDATETIMEFROMPARTS, and TIMEFROMPARTS. For example, to build a DATE value from 
+its parts, you would use an expression such as DATEFROMPARTS(2017, 02, 12).
+
+Finally, the EOMONTH function computes the respective end of month date for the input date and time value. For example, suppose that today was February 12, 2017. The expression 
+EOMONTH(SYSDATETIME()) would then return the date ‘2017-02-29’. This function supports a second optional input indicating how many months to add to the result (or subtract if negative).
+
+#### Add and diff functions
+
+T-SQL supports addition and difference date and time functions called DATEADD and DATEDIFF.
+
+DATEADD is a very commonly used function. With it, you can add a requested number of units of a specified part to a specified date and time value. For example, the expression 
+```DATEADD(year, 1, ‘20170212’)``` adds one year to the input date February 12, 2017.
+
+DATEDIFF is another commonly used function; it returns the difference in terms of a requested part between two date and time values. For example, the expression ```DATEDIFF(day, ‘20160212’, ‘20170212’)``` computes the difference in days between February 12, 2016 and February 12, 2017, returning the value 366. Note that this function looks only at the parts from the requested one and above in the date and time hierarchy—not below. For example, the expression ```DATEDIFF(year, ‘20161231’, ‘20170101’)``` looks only at the year part, and hence returns 1. It doesn’t look at the month and day parts of the values. The DATEDIFF function returns a value of an INT type. If the difference doesn’t fit in a four-byte integer, use the DATEDIFF_BIG function instead. This function returns the result as a BIGINT type.
+
 
